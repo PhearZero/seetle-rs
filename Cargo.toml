@@ -19,10 +19,12 @@ ring = "0.17"
 uuid = { version = "1.0", features = ["v4"] }
 hex = "0.4"
 xhd-wallet-api = { package = "ed25519-bip32", git = "https://github.com/algorandfoundation/xHD-Wallet-API-rs.git" }
+tss-esapi = { version = "7.5", optional = true }
 
 [features]
 default = []
 tropic = []
+tpm = ["dep:tss-esapi"]
 
 [build-dependencies]
 cmake = "0.1"

@@ -13,6 +13,7 @@ By defining abstract backends and secure storage integration, `seelte` enables o
    - **[Keyring](docs/keyring.md):** Utilizing system-level secure credential storage (macOS Keychain, Windows Credential Manager, Linux Secret Service) with `ring` for cryptographic operations.
    - **[Secure Environment](docs/secure_env.md):** Hardware-backed key management for Android (KeyStore) and iOS (Secure Enclave) using the `secure-env` crate.
    - **[Tropic Square](docs/tropic.md):** Supporting TROPIC01 secure element via `libtropic`.
+   - **[TPM 2.0](docs/tpm.md):** Utilizing Trusted Platform Modules for hardware-backed keys.
    - **[XHD Wallet](docs/xhd.md):** Hierarchical Deterministic Ed25519 wallets via `xhd-wallet-api`.
    - **[Mock Backend](docs/mock.md):** In-memory backend for testing.
 - **Async Runtime:** Fully asynchronous using `tokio`, allowing integration into highly-concurrent web servers or network clients.
@@ -24,6 +25,7 @@ By defining abstract backends and secure storage integration, `seelte` enables o
 | [`NordicBackend`](docs/nordic.md) | Nordic SoCs | PSA ITS / PSA Key | CryptoCell / PSA | Yes |
 | [`KeyringBackend`](docs/keyring.md) | Desktop (macOS/Win/Linux) | OS Keychain | `ring` | Partial* |
 | [`SecureEnvBackend`](docs/secure_env.md) | Mobile (Android/iOS) | KeyStore / Secure Enclave | OS Secure Environment | Yes |
+| [`TpmBackend`](docs/tpm.md) | Desktop/Server (TPM 2.0) | TPM wrapped blobs | TPM 2.0 | Yes |
 | [`TropicBackend`](docs/tropic.md) | Any (w/ TROPIC01) | TROPIC01 R-Mem | TROPIC01 SPECT | Yes |
 | [`XHDBackend`](docs/xhd.md) | Any | SecureStorage | xhd-wallet-api | No (HD) |
 | [`MockBackend`](docs/mock.md) | Any | In-memory | Mock (Fake data) | No |
