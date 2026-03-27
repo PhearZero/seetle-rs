@@ -66,6 +66,9 @@ pub enum Algorithm {
     },
     Generic {
         name: String,
+    },
+    Ed25519 {
+        name: String,
     }
 }
 
