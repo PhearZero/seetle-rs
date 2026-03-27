@@ -1,0 +1,23 @@
+[package]
+name = "seelte"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A Rust library based on WebCrypto's Seetle API with hardware-backed key management extensions"
+repository = "https://github.com/brave-experiments/hardware-backed-webcrypto"
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+async-trait = "0.1"
+futures = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+keyring = "3.3"
+ring = "0.17"
+uuid = { version = "1.0", features = ["v4"] }
+hex = "0.4"
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+secure-env = { package = "animo-secure-env", version = "0.5.0" }
