@@ -233,13 +233,13 @@ impl Seetle for XHDBackend {
 #[cfg(test)]
 mod xhd_tests {
     use super::*;
-    use crate::backends::mock::MemoryStorage;
+    use crate::storage::{MemoryStorage, TpmStorage};
 
     const SEED: [u8; 64] = [0x42; 64];
 
     #[tokio::test]
     async fn test_xhd_backend_derivation_and_sign() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let root_key = XPrv::from_seed(&SEED);
         let backend = XHDBackend::new(storage, root_key);
         let seetle = backend.seetle();
@@ -279,7 +279,7 @@ mod xhd_tests {
 
     #[tokio::test]
     async fn test_xhd_backend_v2_scheme() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let root_key = XPrv::from_seed(&SEED);
         let backend = XHDBackend::new(storage, root_key);
         let seetle = backend.seetle();
@@ -304,6 +304,44 @@ mod xhd_tests {
             let signature = seetle.sign(algorithm.clone(), KeyOrIdentifier::Identifier(id.clone()), data.clone()).await.unwrap();
             let verified = seetle.verify(algorithm, KeyOrIdentifier::Identifier(id), signature, data).await.unwrap();
             assert!(verified);
+        } else {
+            panic!("Expected identifier");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_xhd_with_tpm_storage() {
+        // Compose TpmStorage (mocked since no TPM) with XHDBackend
+        let base_storage = Arc::new(MemoryStorage::new());
+        let secure_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+        
+        let root_key = XPrv::from_seed(&SEED);
+        let backend = XHDBackend::new(secure_storage, root_key);
+        let seetle = backend.seetle();
+
+        let algorithm = Algorithm::Ed25519 {
+            name: "XHD:Address:0:0:Peikert".into(),
+        };
+        let bindings = Bindings {
+            identifier: "secure-xhd-key".into(),
+            ..Default::default()
+        };
+
+        // Key generation (metadata will be "wrapped" by TpmStorage)
+        let key_id = seetle.generate_key(
+            algorithm.clone(),
+            false,
+            Some(bindings),
+            vec![KeyUsage::Sign],
+        ).await.unwrap();
+
+        if let KeyOrIdentifier::Identifier(id) = key_id {
+            assert_eq!(id, "secure-xhd-key");
+            
+            // Signing (metadata will be "unwrapped" by TpmStorage)
+            let data = b"secure message".to_vec();
+            let signature = seetle.sign(algorithm, KeyOrIdentifier::Identifier(id), data).await.unwrap();
+            assert_eq!(signature.len(), 64);
         } else {
             panic!("Expected identifier");
         }

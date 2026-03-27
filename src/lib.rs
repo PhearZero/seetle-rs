@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 pub mod backends;
+pub mod storage;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum KeyType {
@@ -289,12 +290,13 @@ pub trait Seetle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::mock::{MemoryStorage, MockBackend};
+    use crate::backends::mock::MockBackend;
+    use crate::storage::MemoryStorage;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_generate_hardware_key() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = MockBackend::new(storage);
         let seelte = Seelte::new(backend);
         let seetle = seelte.seetle();
@@ -326,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardware_bound_must_not_be_extractable() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = MockBackend::new(storage);
         let seelte = Seelte::new(backend);
         let seetle = seelte.seetle();
@@ -354,7 +356,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardware_key_storage() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = MockBackend::new(storage.clone());
         let seelte = Seelte::new(backend);
         let seetle = seelte.seetle();

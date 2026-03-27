@@ -32,7 +32,7 @@ The build process uses CMake to compile the `libtropic` SDK and link it with the
 #### Usage Example
 ```rust
 use seelte::backends::TropicBackend;
-use seelte::backends::mock::MemoryStorage; // Or any implementation of SecureStorage
+use seelte::storage::MemoryStorage; // Or any implementation of SecureStorage
 use std::sync::Arc;
 
 let storage = Arc::new(MemoryStorage::new());
@@ -40,4 +40,20 @@ let backend = TropicBackend::new(storage).expect("Failed to initialize TropicBac
 
 let seetle = backend.seetle();
 // Proceed with generating or using keys via the Seetle trait...
+```
+
+#### Metadata Protection with TPM
+
+You can use `TpmStorage` to protect your TROPIC01 key slot metadata and origin bindings:
+
+```rust
+use seelte::storage::{MemoryStorage, TpmStorage};
+use seelte::backends::TropicBackend;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let tpm_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+
+// TROPIC01 metadata is now wrapped by TPM
+let backend = TropicBackend::new(tpm_storage).unwrap();
 ```

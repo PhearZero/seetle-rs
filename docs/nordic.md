@@ -24,7 +24,7 @@ CONFIG_NORDIC_SECURITY_BACKEND=y
 #### Usage Example
 ```rust
 use seelte::backends::NordicBackend;
-use seelte::backends::mock::MemoryStorage; // Or any implementation of SecureStorage
+use seelte::storage::MemoryStorage; // Or any implementation of SecureStorage
 use std::sync::Arc;
 
 let storage = Arc::new(MemoryStorage::new());
@@ -35,4 +35,20 @@ backend.init().expect("Failed to initialize PSA subsystem");
 
 let seetle = backend.seetle();
 // Proceed with generating or using keys via the Seetle trait...
+```
+
+#### Metadata Protection with TPM
+
+While Nordic devices typically don't have a TPM, the `NordicBackend` is compatible with any `SecureStorage` implementation. If your host environment provides a TPM, you can wrap the metadata:
+
+```rust
+use seelte::storage::{MemoryStorage, TpmStorage};
+use seelte::backends::NordicBackend;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let tpm_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+
+// Nordic metadata (PSA IDs, etc.) are now wrapped by TPM
+let backend = NordicBackend::new(tpm_storage);
 ```

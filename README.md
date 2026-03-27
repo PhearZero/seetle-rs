@@ -8,29 +8,110 @@ By defining abstract backends and secure storage integration, `seelte` enables o
 
 - **WebCrypto-style API:** Implements familiar WebCrypto Subtle methods (`generate_key`, `sign`, `verify`, `encrypt`, `decrypt`, etc.) inside a unified trait.
 - **Hardware-bound Keys:** Support for hardware-backed keys, storing origin bindings and unique identifiers persistently. Keys marked as hardware-bound cannot be extracted, providing strong isolation and hardware-level security guarantees.
-- **Pluggable Backends:** Inject custom storage or cryptographic modules implementing the `Backend` and `SecureStorage` traits to orchestrate different KMS, HSM, or system keychain mechanisms seamlessly. Includes:
-   - **[Nordic Semiconductor](docs/nordic.md):** Leveraging Arm CryptoCell via PSA Crypto.
-   - **[Keyring](docs/keyring.md):** Utilizing system-level secure credential storage (macOS Keychain, Windows Credential Manager, Linux Secret Service) with `ring` for cryptographic operations.
-   - **[Secure Environment](docs/secure_env.md):** Hardware-backed key management for Android (KeyStore) and iOS (Secure Enclave) using the `secure-env` crate.
-   - **[Tropic Square](docs/tropic.md):** Supporting TROPIC01 secure element via `libtropic`.
-   - **[TPM 2.0](docs/tpm.md):** Utilizing Trusted Platform Modules for hardware-backed keys.
-   - **[XHD Wallet](docs/xhd.md):** Hierarchical Deterministic Ed25519 wallets via `xhd-wallet-api`.
-   - **[Mock Backend](docs/mock.md):** In-memory backend for testing.
+- **Pluggable Backends & Storage:** Inject custom storage or cryptographic modules implementing the `Backend` and `SecureStorage` traits. The `seelte::storage` module provides various implementations:
+   - **[MemoryStorage](docs/mock.md):** Simple in-memory storage for testing.
+   - **[TpmStorage](docs/tpm.md):** Decorator that adds TPM-backed hardware protection (wrapping) to any storage implementation.
+   - **[KeyringStorage](docs/keyring.md):** Decorator that adds OS-secured (Keychain/Credential Manager) protection to any storage.
+   - **[SecureEnvStorage](docs/secure_env.md):** Decorator for mobile hardware-backed metadata protection.
+   - **Backends:**
+     - **[Nordic Semiconductor](docs/nordic.md):** Leveraging Arm CryptoCell via PSA Crypto.
+     - **[Keyring](docs/keyring.md):** Utilizing system-level secure credential storage.
+     - **[Secure Environment](docs/secure_env.md):** Android/iOS hardware-backed key management.
+     - **[Tropic Square](docs/tropic.md):** TROPIC01 secure element integration.
+     - **[TPM 2.0](docs/tpm.md):** TPM-backed keys.
+     - **[XHD Wallet](docs/xhd.md):** Hierarchical Deterministic Ed25519 wallets.
+     - **[Mock Backend](docs/mock.md):** In-memory backend for testing.
 - **Async Runtime:** Fully asynchronous using `tokio`, allowing integration into highly-concurrent web servers or network clients.
 
 ## Supported Backends
 
-| Backend | Platform | Key Storage | Crypto Engine | Hardware Bound |
+The following backends implement the `Seetle` trait, providing cryptographic operations with varying degrees of hardware isolation and storage strategies. All backends use the `SecureStorage` trait to manage metadata such as origin bindings and key identifiers.
+
+| Backend | Platform | Key Material Storage | Metadata Storage | Hardware Bound |
 |---|---|---|---|---|
-| [`NordicBackend`](docs/nordic.md) | Nordic SoCs | PSA ITS / PSA Key | CryptoCell / PSA | Yes |
-| [`KeyringBackend`](docs/keyring.md) | Desktop (macOS/Win/Linux) | OS Keychain | `ring` | Partial* |
-| [`SecureEnvBackend`](docs/secure_env.md) | Mobile (Android/iOS) | KeyStore / Secure Enclave | OS Secure Environment | Yes |
-| [`TpmBackend`](docs/tpm.md) | Desktop/Server (TPM 2.0) | TPM wrapped blobs | TPM 2.0 | Yes |
-| [`TropicBackend`](docs/tropic.md) | Any (w/ TROPIC01) | TROPIC01 R-Mem | TROPIC01 SPECT | Yes |
-| [`XHDBackend`](docs/xhd.md) | Any | SecureStorage | xhd-wallet-api | No (HD) |
-| [`MockBackend`](docs/mock.md) | Any | In-memory | Mock (Fake data) | No |
+| [`NordicBackend`](docs/nordic.md) | Nordic SoCs | PSA ITS / PSA Key | `SecureStorage` | Yes |
+| [`KeyringBackend`](docs/keyring.md) | Desktop (macOS/Win/Linux) | OS Keychain | `SecureStorage` | Partial* |
+| [`SecureEnvBackend`](docs/secure_env.md) | Mobile (Android/iOS) | KeyStore / Secure Enclave | `SecureStorage` | Yes |
+| [`TpmBackend`](docs/tpm.md) | Desktop/Server (TPM 2.0) | `SecureStorage` (wrapped) | `SecureStorage` | Yes |
+| [`TropicBackend`](docs/tropic.md) | Any (w/ TROPIC01) | TROPIC01 R-Mem | `SecureStorage` | Yes |
+| [`XHDBackend`](docs/xhd.md) | Any | `SecureStorage` (root) | `SecureStorage` | No (HD) |
+| [`MockBackend`](docs/mock.md) | Any | `SecureStorage` | `SecureStorage` | No |
 
 *\*KeyringBackend stores key material in the OS keychain. While the keychain is secure, the cryptographic operations happen in the library memory (via `ring`), unlike `NordicBackend` or `SecureEnvBackend` where the key material never leaves the hardware.*
+
+## Storage Architecture & Composition
+
+The `seelte` library decouples key material management from metadata persistence (like origin bindings and labels) through the `SecureStorage` trait. This modular approach allows for powerful storage composition:
+
+### Available Storage Implementations
+
+| Storage | Description | Hardware Protected |
+|---|---|---|
+| [`MemoryStorage`](docs/mock.md) | Simple in-memory storage, ideal for testing and ephemeral keys. | No |
+| [`TpmStorage`](docs/tpm.md) | A decorator that adds TPM 2.0-backed encryption (wrapping) to *any* other storage implementation. | **Yes** |
+| [`KeyringStorage`](docs/keyring.md) | A decorator that uses the OS's secure keyring (Keychain/Credential Manager) to protect any storage. | **Yes** (OS-Secured) |
+| [`SecureEnvStorage`](docs/secure_env.md) | A decorator for mobile platforms providing hardware-backed protection for metadata. | **Yes** (Android/iOS) |
+| Custom | Any implementation of the `SecureStorage` trait. | Varies |
+
+### Storage Compatibility Matrix
+
+All `seelte` backends are fully compatible with any implementation of the `SecureStorage` trait.
+
+| Backend | `MemoryStorage` | `TpmStorage` | `KeyringStorage` | `SecureEnvStorage` |
+|---|:---:|:---:|:---:|:---:|
+| [`NordicBackend`](docs/nordic.md) | ✓ | ✓* | ✓ | ✓ |
+| [`KeyringBackend`](docs/keyring.md) | ✓ | ✓ | ✓ | ✓ |
+| [`SecureEnvBackend`](docs/secure_env.md) | ✓ | ✓* | ✓ | ✓ |
+| [`TpmBackend`](docs/tpm.md) | ✓ | ✓ | ✓ | ✓ |
+| [`TropicBackend`](docs/tropic.md) | ✓ | ✓ | ✓ | ✓ |
+| [`XHDBackend`](docs/xhd.md) | ✓ | ✓ | ✓ | ✓ |
+| [`MockBackend`](docs/mock.md) | ✓ | ✓ | ✓ | ✓ |
+
+*\*Compatibility depends on the availability of the underlying hardware (e.g., TPM 2.0) on the target platform. While the code is compatible, initializing `TpmStorage` on a platform without a TPM will result in a runtime error.*
+
+### Example: Protecting XHD Wallets with TPM
+
+You can use `TpmStorage` to ensure that your sensitive metadata (like the root key of an `XHDBackend` or its derivation paths) is protected by hardware encryption, even when stored in a standard database or in memory:
+
+```rust
+use seelte::storage::{MemoryStorage, TpmStorage};
+use seelte::backends::XHDBackend;
+use std::sync::Arc;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Create a base storage (e.g., in-memory)
+    let base_storage = Arc::new(MemoryStorage::new());
+
+    // 2. Wrap it with TPM protection
+    // All items stored in tpm_storage will be encrypted by the TPM
+    let tpm_storage = Arc::new(TpmStorage::new(base_storage)?);
+
+    // 3. Use the TPM-protected storage with your chosen backend
+    let root_key = xhd_wallet_api::XPrv::from_seed(&[0u8; 64]);
+    let backend = XHDBackend::new(tpm_storage, root_key);
+    
+    // Now, any key generated or metadata stored via this backend 
+    // is transparently encrypted/decrypted by the TPM hardware.
+    Ok(())
+}
+```
+
+### Example: Hardware-Backed Metadata for Keyring
+
+Even though `KeyringBackend` stores key material in the OS keychain, you can use `TpmStorage` to protect your origin bindings and other metadata in a hardware-isolated way:
+
+```rust
+use seelte::storage::{MemoryStorage, TpmStorage};
+use seelte::backends::KeyringBackend;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let tpm_storage = Arc::new(TpmStorage::new(base_storage)?);
+
+// Origin bindings and key IDs are now wrapped by TPM
+let backend = KeyringBackend::new(tpm_storage);
+```
 
 ## Usage
 
@@ -38,7 +119,8 @@ Here's an example of how you can configure and use the `seelte` API with the `Ke
 
 ```rust
 use seelte::{Algorithm, Bindings, KeyUsage, Seelte};
-use seelte::backends::{KeyringBackend, MemoryStorage};
+use seelte::backends::KeyringBackend;
+use seelte::storage::MemoryStorage;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -177,7 +259,22 @@ async fn main() -> Result<(), seelte::SeetleError> {
 
 Unlike the standard browser-based WebCrypto specification, `seelte` provides mechanisms like `update_key` and `delete_key` to manage hardware credentials continuously as keys transition between policies and origin relationships. It uses `KeyOrIdentifier` enums throughout cryptographic routines to execute hardware-level functions by just using handles/references.
 
-## License
+### Composition: Hardware-Protected Metadata
+
+You can compose storage and backends for enhanced security. For example, using the `TpmStorage` decorator with the `XHDBackend` to wrap hierarchical derivation paths in hardware:
+
+```rust
+use seelte::backends::XHDBackend;
+use seelte::storage::{MemoryStorage, TpmStorage};
+use xhd_wallet_api::XPrv;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let secure_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+
+let root_key = XPrv::from_seed(&[0u8; 64]);
+let backend = XHDBackend::new(secure_storage, root_key);
+```
 
 This project is licensed under either of
 

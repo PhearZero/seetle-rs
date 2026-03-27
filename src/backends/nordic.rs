@@ -485,11 +485,11 @@ impl Seetle for NordicBackend {
 #[cfg(test)]
 mod nordic_tests {
     use super::*;
-    use crate::backends::mock::MemoryStorage;
+    use crate::storage::MemoryStorage;
 
     #[tokio::test]
     async fn test_nordic_usage_enforcement() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = NordicBackend::new(storage.clone());
         
         let bindings = Bindings {

@@ -10,7 +10,7 @@ The `MockBackend` provides an in-memory implementation of the `Seetle` trait for
 #### Usage Example
 ```rust
 use seelte::backends::MockBackend;
-use seelte::backends::mock::MemoryStorage;
+use seelte::storage::MemoryStorage;
 use std::sync::Arc;
 
 let storage = Arc::new(MemoryStorage::new());
@@ -18,4 +18,20 @@ let backend = MockBackend::new(storage);
 
 let seetle = backend.seetle();
 // Proceed with generating or using keys via the Seetle trait...
+```
+
+### MemoryStorage and TpmStorage
+
+The `MockBackend` is typically used with `MemoryStorage` for testing. However, it can also be used with any `SecureStorage` implementation, including `TpmStorage`:
+
+```rust
+use seelte::storage::{MemoryStorage, TpmStorage};
+use seelte::backends::MockBackend;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let tpm_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+
+// Even mock metadata is now wrapped by TPM
+let backend = MockBackend::new(tpm_storage);
 ```

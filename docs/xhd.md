@@ -29,7 +29,7 @@ To use the `XHDBackend`, you need to provide a root extended private key (XPrv) 
 
 ```rust
 use seelte::backends::xhd::XHDBackend;
-use seelte::backends::mock::MemoryStorage;
+use seelte::storage::MemoryStorage;
 use xhd_wallet_api::XPrv;
 use std::sync::Arc;
 
@@ -94,3 +94,20 @@ assert!(valid);
 #### Internal Metadata
 
 The backend stores the derivation parameters in the provided `SecureStorage` under the key's identifier. This allows the backend to re-derive the private key when needed for signing without storing the private key material itself in the storage. Only the root `XPrv` needs to be securely managed by the application.
+
+#### Enhancing Metadata Security with TPM
+
+To add hardware protection to the derivation parameters, you can wrap your storage with `TpmStorage`:
+
+```rust
+use seelte::storage::{MemoryStorage, TpmStorage};
+use seelte::backends::xhd::XHDBackend;
+use xhd_wallet_api::XPrv;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let secure_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+
+let root_key = XPrv::from_seed(&[0u8; 64]);
+let backend = XHDBackend::new(secure_storage, root_key);
+```

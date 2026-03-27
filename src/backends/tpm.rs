@@ -189,8 +189,6 @@ impl Seetle for TpmBackend {
             }
             KeyOrIdentifier::Key(_k) => return Err(SeetleError::NotSupported),
         };
-        
-        Err(SeetleError::NotSupported)
     }
 
     async fn encrypt(
@@ -285,11 +283,11 @@ impl Seetle for TpmBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::mock::MemoryStorage;
+    use crate::storage::MemoryStorage;
 
     #[tokio::test]
     async fn test_tpm_backend_creation() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         // Should succeed even without TPM if feature is disabled (returns skeleton)
         // If feature is enabled, it might fail if TPM/TSS is missing, but that's expected.
         let result = TpmBackend::new(storage);

@@ -7,7 +7,7 @@ pub mod xhd;
 pub mod tpm;
 
 pub use nordic::NordicBackend;
-pub use mock::{MockBackend, MemoryStorage};
+pub use mock::MockBackend;
 pub use keyring::KeyringBackend;
 pub use secure_env::SecureEnvBackend;
 pub use tropic::TropicBackend;

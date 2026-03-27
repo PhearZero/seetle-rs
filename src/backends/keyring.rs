@@ -322,11 +322,11 @@ impl Seetle for KeyringBackend {
 #[cfg(test)]
 mod keyring_tests {
     use super::*;
-    use crate::backends::mock::MemoryStorage;
+    use crate::storage::MemoryStorage;
 
     #[tokio::test]
     async fn test_keyring_backend_ecdsa() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = KeyringBackend::new(storage);
         let seetle = backend.seetle();
 

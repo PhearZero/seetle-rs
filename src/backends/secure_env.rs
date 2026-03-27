@@ -261,11 +261,11 @@ impl Seetle for SecureEnvBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::mock::MemoryStorage;
+    use crate::storage::MemoryStorage;
 
     #[tokio::test]
     async fn test_secure_env_backend_creation() {
-        let storage = Arc::new(MemoryStorage::new());
+        let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let _backend = SecureEnvBackend::new(storage);
     }
 
