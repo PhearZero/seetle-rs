@@ -19,5 +19,15 @@ ring = "0.17"
 uuid = { version = "1.0", features = ["v4"] }
 hex = "0.4"
 
+[features]
+default = []
+tropic = []
+
+[build-dependencies]
+cmake = "0.1"
+
+[package.metadata.docs.rs]
+all-features = true
+
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 secure-env = { package = "animo-secure-env", version = "0.5.0" }

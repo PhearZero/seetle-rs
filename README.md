@@ -9,19 +9,22 @@ By defining abstract backends and secure storage integration, `seelte` enables o
 - **WebCrypto-style API:** Implements familiar WebCrypto Subtle methods (`generate_key`, `sign`, `verify`, `encrypt`, `decrypt`, etc.) inside a unified trait.
 - **Hardware-bound Keys:** Support for hardware-backed keys, storing origin bindings and unique identifiers persistently. Keys marked as hardware-bound cannot be extracted, providing strong isolation and hardware-level security guarantees.
 - **Pluggable Backends:** Inject custom storage or cryptographic modules implementing the `Backend` and `SecureStorage` traits to orchestrate different KMS, HSM, or system keychain mechanisms seamlessly. Includes:
-   - **Nordic Semiconductor:** Leveraging Arm CryptoCell via PSA Crypto.
-   - **Keyring:** Utilizing system-level secure credential storage (macOS Keychain, Windows Credential Manager, Linux Secret Service) with `ring` for cryptographic operations.
-   - **Secure Environment:** Hardware-backed key management for Android (KeyStore) and iOS (Secure Enclave) using the `secure-env` crate.
+   - **[Nordic Semiconductor](docs/nordic.md):** Leveraging Arm CryptoCell via PSA Crypto.
+   - **[Keyring](docs/keyring.md):** Utilizing system-level secure credential storage (macOS Keychain, Windows Credential Manager, Linux Secret Service) with `ring` for cryptographic operations.
+   - **[Secure Environment](docs/secure_env.md):** Hardware-backed key management for Android (KeyStore) and iOS (Secure Enclave) using the `secure-env` crate.
+   - **[Tropic Square](docs/tropic.md):** Supporting TROPIC01 secure element via `libtropic`.
+   - **[Mock Backend](docs/mock.md):** In-memory backend for testing.
 - **Async Runtime:** Fully asynchronous using `tokio`, allowing integration into highly-concurrent web servers or network clients.
 
 ## Supported Backends
 
 | Backend | Platform | Key Storage | Crypto Engine | Hardware Bound |
 |---|---|---|---|---|
-| `NordicBackend` | Nordic SoCs | PSA ITS / PSA Key | CryptoCell / PSA | Yes |
-| `KeyringBackend` | Desktop (macOS/Win/Linux) | OS Keychain | `ring` | Partial* |
-| `SecureEnvBackend` | Mobile (Android/iOS) | KeyStore / Secure Enclave | OS Secure Environment | Yes |
-| `MockBackend` | Any | In-memory | Mock (Fake data) | No |
+| [`NordicBackend`](docs/nordic.md) | Nordic SoCs | PSA ITS / PSA Key | CryptoCell / PSA | Yes |
+| [`KeyringBackend`](docs/keyring.md) | Desktop (macOS/Win/Linux) | OS Keychain | `ring` | Partial* |
+| [`SecureEnvBackend`](docs/secure_env.md) | Mobile (Android/iOS) | KeyStore / Secure Enclave | OS Secure Environment | Yes |
+| [`TropicBackend`](docs/tropic.md) | Any (w/ TROPIC01) | TROPIC01 R-Mem | TROPIC01 SPECT | Yes |
+| [`MockBackend`](docs/mock.md) | Any | In-memory | Mock (Fake data) | No |
 
 *\*KeyringBackend stores key material in the OS keychain. While the keychain is secure, the cryptographic operations happen in the library memory (via `ring`), unlike `NordicBackend` or `SecureEnvBackend` where the key material never leaves the hardware.*
 
@@ -182,3 +185,16 @@ at your option.
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+
+### Tropic Square Backend (feature-gated)
+
+For detailed information, see the [TropicBackend Documentation](docs/tropic.md).
+
+- A `TropicBackend` integrating the TROPIC01 secure element via `libtropic` is available behind the `tropic` Cargo feature.
+- To enable it, build with: `cargo build --features tropic`.
+- Notes:
+  - The default build does not compile/link `libtropic` to keep host development simple.
+  - The provided CMake integration builds `libtropic` with the mock HAL and Trezor Crypto CAL under `libtropic_build/`. For real hardware, point the build to the appropriate HAL (e.g., Linux SPI) and platform toolchain.
+  - The backend focuses on ECDSA P-256 keys (key generation, signing). Verification on host uses `ring` with the public key from the device.
+  - On unsupported targets or when the feature is disabled, `TropicBackend` methods return `SeetleError::NotSupported`.
