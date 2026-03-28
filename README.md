@@ -1,27 +1,78 @@
-# Seelte
+# Seetle
 
-`seelte` is a Rust library providing a pluggable, WebCrypto-like API designed to safely handle cryptographic materials. It implements the [Hardware-Backed WebCrypto Extension](https://github.com/brave-experiments/hardware-backed-webcrypto) proposal. 
+`seetle` is a Rust library providing a pluggable, WebCrypto-like API designed to safely handle cryptographic materials. It implements the [Hardware-Backed WebCrypto Extension](https://github.com/brave-experiments/hardware-backed-webcrypto) proposal. 
 
-By defining abstract backends and secure storage integration, `seelte` enables operations with hardware-bound keys across origins without exposing the key material itself.
+By defining abstract backends and secure storage integration, `seetle` enables operations with hardware-bound keys across origins without exposing the key material itself.
 
 ## Features
 
 - **WebCrypto-style API:** Implements familiar WebCrypto Subtle methods (`generate_key`, `sign`, `verify`, `encrypt`, `decrypt`, etc.) inside a unified trait.
 - **Hardware-bound Keys:** Support for hardware-backed keys, storing origin bindings and unique identifiers persistently. Keys marked as hardware-bound cannot be extracted, providing strong isolation and hardware-level security guarantees.
-- **Pluggable Backends & Storage:** Inject custom storage or cryptographic modules implementing the `Backend` and `SecureStorage` traits. The `seelte::storage` module provides various implementations:
-   - **[MemoryStorage](docs/mock.md):** Simple in-memory storage for testing.
-   - **[TpmStorage](docs/tpm.md):** Decorator that adds TPM-backed hardware protection (wrapping) to any storage implementation.
-   - **[KeyringStorage](docs/keyring.md):** Decorator that adds OS-secured (Keychain/Credential Manager) protection to any storage.
-   - **[SecureEnvStorage](docs/secure_env.md):** Decorator for mobile hardware-backed metadata protection.
+- **Pluggable Backends & Storage:** Inject custom storage or cryptographic modules implementing the `Backend` and `SecureStorage` traits. The `seetle` library provides various storage implementations:
+   - **[MemoryStorage](src/mock/README.md):** Simple in-memory storage for testing.
+   - **[TpmStorage](src/tpm/README.md):** Decorator that adds TPM-backed hardware protection (wrapping) to any storage implementation.
+   - **[KeyringStorage](src/keyring/README.md):** Decorator that adds OS-secured (Keychain/Credential Manager) protection to any storage.
+   - **[SecureEnvStorage](src/secure_env/README.md):** Decorator for mobile hardware-backed metadata protection.
    - **Backends:**
-     - **[Nordic Semiconductor](docs/nordic.md):** Leveraging Arm CryptoCell via PSA Crypto.
-     - **[Keyring](docs/keyring.md):** Utilizing system-level secure credential storage.
-     - **[Secure Environment](docs/secure_env.md):** Android/iOS hardware-backed key management.
-     - **[Tropic Square](docs/tropic.md):** TROPIC01 secure element integration.
-     - **[TPM 2.0](docs/tpm.md):** TPM-backed keys.
-     - **[XHD Wallet](docs/xhd.md):** Hierarchical Deterministic Ed25519 wallets.
-     - **[Mock Backend](docs/mock.md):** In-memory backend for testing.
+     - **[Nordic Semiconductor](src/nordic/README.md):** Leveraging Arm CryptoCell via PSA Crypto.
+     - **[Keyring](src/keyring/README.md):** Utilizing system-level secure credential storage.
+     - **[Secure Environment](src/secure_env/README.md):** Android/iOS hardware-backed key management.
+     - **[Tropic Square](src/tropic/README.md):** TROPIC01 secure element integration.
+     - **[TPM 2.0](src/tpm/README.md):** TPM-backed keys.
+     - **[XHD Wallet](src/xhd/README.md):** Hierarchical Deterministic Ed25519 wallets.
+     - **[Mock Backend](src/mock/README.md):** In-memory backend for testing.
 - **Async Runtime:** Fully asynchronous using `tokio`, allowing integration into highly-concurrent web servers or network clients.
+
+## CLI Usage
+
+The library includes a CLI tool for hardware-backed key management on desktop platforms.
+
+### Installation
+
+```bash
+cargo build --release
+```
+
+To enable optional features like TPM 2.0 or Keyring support:
+
+```bash
+# For TPM 2.0 support (requires tpm2-tss libraries)
+cargo build --release --features tpm
+
+# For Tropic Square support
+cargo build --release --features tropic
+```
+
+### System Dependencies
+
+#### TPM 2.0 (Linux)
+Requires the TPM2-TSS software stack. On Ubuntu/Debian:
+```bash
+sudo apt install libtss2-dev tpm2-tools
+```
+Ensure your user has access to `/dev/tpmrm0` (usually by being in the `tss` group).
+
+#### Keyring (Linux)
+Requires a Secret Service provider (e.g., `gnome-keyring`, `kwallet`) and a running D-Bus session bus for persistent storage. On some systems, `libdbus-1-dev` may be needed for compilation.
+
+### Examples
+
+```bash
+# Generate a key using XHD backend with Keyring root
+./target/release/seetle generate-key --identifier my-key --root-backend keyring
+
+# Sign data
+./target/release/seetle sign --identifier my-key --data "Hello, world!"
+
+# Verify signature
+./target/release/seetle verify --identifier my-key --data "Hello, world!" --signature <HEX_SIGNATURE>
+```
+
+### Options
+
+- `-s, --storage-dir <DIR>`: Directory for key metadata (default: `seetle-keystore`)
+- `-w, --storage-wrapper <TYPE>`: Secure storage wrapper (`keyring` (default), `tpm`, or `none`)
+- `-r, --root-backend <TYPE>`: Root backend for XHD derivation (`keyring` (default), `tpm`, or `mock`)
 
 ## Supported Backends
 
@@ -29,43 +80,51 @@ The following backends implement the `Seetle` trait, providing cryptographic ope
 
 | Backend | Platform | Key Material Storage | Metadata Storage | Hardware Bound |
 |---|---|---|---|---|
-| [`NordicBackend`](docs/nordic.md) | Nordic SoCs | PSA ITS / PSA Key | `SecureStorage` | Yes |
-| [`KeyringBackend`](docs/keyring.md) | Desktop (macOS/Win/Linux) | OS Keychain | `SecureStorage` | Partial* |
-| [`SecureEnvBackend`](docs/secure_env.md) | Mobile (Android/iOS) | KeyStore / Secure Enclave | `SecureStorage` | Yes |
-| [`TpmBackend`](docs/tpm.md) | Desktop/Server (TPM 2.0) | `SecureStorage` (wrapped) | `SecureStorage` | Yes |
-| [`TropicBackend`](docs/tropic.md) | Any (w/ TROPIC01) | TROPIC01 R-Mem | `SecureStorage` | Yes |
-| [`XHDBackend`](docs/xhd.md) | Any | `SecureStorage` (root) | `SecureStorage` | No (HD) |
-| [`MockBackend`](docs/mock.md) | Any | `SecureStorage` | `SecureStorage` | No |
+| [`NordicBackend`](src/nordic/README.md) | Nordic SoCs | PSA ITS / PSA Key | `SecureStorage` | Yes |
+| [`KeyringBackend`](src/keyring/README.md) | Desktop (macOS/Win/Linux) | OS Keychain | `SecureStorage` | Partial* |
+| [`SecureEnvBackend`](src/secure_env/README.md) | Mobile (Android/iOS) | KeyStore / Secure Enclave | `SecureStorage` | Yes |
+| [`TpmBackend`](src/tpm/README.md) | Desktop/Server (TPM 2.0) | `SecureStorage` (wrapped) | `SecureStorage` | Yes |
+| [`TropicBackend`](src/tropic/README.md) | Any (w/ TROPIC01) | TROPIC01 R-Mem | `SecureStorage` | Yes |
+| [`XHDBackend`](src/xhd/README.md) | Any | `SecureStorage` (root) | `SecureStorage` | No (HD) |
+| [`MockBackend`](src/mock/README.md) | Any | `SecureStorage` | `SecureStorage` | No |
 
 *\*KeyringBackend stores key material in the OS keychain. While the keychain is secure, the cryptographic operations happen in the library memory (via `ring`), unlike `NordicBackend` or `SecureEnvBackend` where the key material never leaves the hardware.*
 
 ## Storage Architecture & Composition
 
-The `seelte` library decouples key material management from metadata persistence (like origin bindings and labels) through the `SecureStorage` trait. This modular approach allows for powerful storage composition:
+The `seetle` library decouples key material management from metadata persistence (like origin bindings and labels) through the `SecureStorage` trait. This modular approach allows for powerful storage composition and, in some contexts, the storage itself can be used to store raw key material securely.
 
 ### Available Storage Implementations
 
 | Storage | Description | Hardware Protected |
 |---|---|---|
-| [`MemoryStorage`](docs/mock.md) | Simple in-memory storage, ideal for testing and ephemeral keys. | No |
-| [`TpmStorage`](docs/tpm.md) | A decorator that adds TPM 2.0-backed encryption (wrapping) to *any* other storage implementation. | **Yes** |
-| [`KeyringStorage`](docs/keyring.md) | A decorator that uses the OS's secure keyring (Keychain/Credential Manager) to protect any storage. | **Yes** (OS-Secured) |
-| [`SecureEnvStorage`](docs/secure_env.md) | A decorator for mobile platforms providing hardware-backed protection for metadata. | **Yes** (Android/iOS) |
+| [`MemoryStorage`](src/mock/README.md) | Simple in-memory storage, ideal for testing and ephemeral keys. | No |
+| [`TpmStorage`](src/tpm/README.md) | A decorator that adds TPM 2.0-backed encryption (wrapping) to *any* other storage implementation. Can be used for metadata and key material. | **Yes** |
+| [`KeyringStorage`](src/keyring/README.md) | A decorator that uses the OS's secure keyring (Keychain/Credential Manager) to protect any storage. | **Yes** (OS-Secured) |
+| [`SecureEnvStorage`](src/secure_env/README.md) | A decorator for mobile platforms providing hardware-backed protection for metadata. | **Yes** (Android/iOS) |
 | Custom | Any implementation of the `SecureStorage` trait. | Varies |
+
+### Storage-based Key Material
+
+Some backends use `SecureStorage` not just for metadata but also for key material:
+
+*   **[`MockBackend`](src/mock/README.md):** Stores all cryptographic keys in the provided storage. Using `TpmStorage` or `KeyringStorage` here provides hardware-wrapped or OS-secured keys.
+*   **[`XHDBackend`](src/xhd/README.md):** Stores its HD wallet root key (seed) in the provided storage. This allows for hardware-backed (wrapped) seeds.
+*   **[`TpmBackend`](src/tpm/README.md):** Stores its TPM-wrapped private key blobs in the storage, ensuring the keys remain bound to the hardware but are persisted flexibly.
 
 ### Storage Compatibility Matrix
 
-All `seelte` backends are fully compatible with any implementation of the `SecureStorage` trait.
+All `seetle` backends are fully compatible with any implementation of the `SecureStorage` trait.
 
 | Backend | `MemoryStorage` | `TpmStorage` | `KeyringStorage` | `SecureEnvStorage` |
 |---|:---:|:---:|:---:|:---:|
-| [`NordicBackend`](docs/nordic.md) | ✓ | ✓* | ✓ | ✓ |
-| [`KeyringBackend`](docs/keyring.md) | ✓ | ✓ | ✓ | ✓ |
-| [`SecureEnvBackend`](docs/secure_env.md) | ✓ | ✓* | ✓ | ✓ |
-| [`TpmBackend`](docs/tpm.md) | ✓ | ✓ | ✓ | ✓ |
-| [`TropicBackend`](docs/tropic.md) | ✓ | ✓ | ✓ | ✓ |
-| [`XHDBackend`](docs/xhd.md) | ✓ | ✓ | ✓ | ✓ |
-| [`MockBackend`](docs/mock.md) | ✓ | ✓ | ✓ | ✓ |
+| [`NordicBackend`](src/nordic/README.md) | ✓ | ✓* | ✓ | ✓ |
+| [`KeyringBackend`](src/keyring/README.md) | ✓ | ✓ | ✓ | ✓ |
+| [`SecureEnvBackend`](src/secure_env/README.md) | ✓ | ✓* | ✓ | ✓ |
+| [`TpmBackend`](src/tpm/README.md) | ✓ | ✓ | ✓ | ✓ |
+| [`TropicBackend`](src/tropic/README.md) | ✓ | ✓ | ✓ | ✓ |
+| [`XHDBackend`](src/xhd/README.md) | ✓ | ✓ | ✓ | ✓ |
+| [`MockBackend`](src/mock/README.md) | ✓ | ✓ | ✓ | ✓ |
 
 *\*Compatibility depends on the availability of the underlying hardware (e.g., TPM 2.0) on the target platform. While the code is compatible, initializing `TpmStorage` on a platform without a TPM will result in a runtime error.*
 
@@ -74,8 +133,9 @@ All `seelte` backends are fully compatible with any implementation of the `Secur
 You can use `TpmStorage` to ensure that your sensitive metadata (like the root key of an `XHDBackend` or its derivation paths) is protected by hardware encryption, even when stored in a standard database or in memory:
 
 ```rust
-use seelte::storage::{MemoryStorage, TpmStorage};
-use seelte::backends::XHDBackend;
+use seetle::memory::MemoryStorage;
+use seetle::tpm::TpmStorage;
+use seetle::xhd::XHDBackend;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -102,8 +162,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Even though `KeyringBackend` stores key material in the OS keychain, you can use `TpmStorage` to protect your origin bindings and other metadata in a hardware-isolated way:
 
 ```rust
-use seelte::storage::{MemoryStorage, TpmStorage};
-use seelte::backends::KeyringBackend;
+use seetle::memory::MemoryStorage;
+use seetle::tpm::TpmStorage;
+use seetle::keyring::KeyringBackend;
 use std::sync::Arc;
 
 let base_storage = Arc::new(MemoryStorage::new());
@@ -115,20 +176,20 @@ let backend = KeyringBackend::new(tpm_storage);
 
 ## Usage
 
-Here's an example of how you can configure and use the `seelte` API with the `KeyringBackend`:
+Here's an example of how you can configure and use the `seetle` API with the `KeyringBackend`:
 
 ```rust
-use seelte::{Algorithm, Bindings, KeyUsage, Seelte};
-use seelte::backends::KeyringBackend;
-use seelte::storage::MemoryStorage;
+use seetle::{Algorithm, Bindings, KeyUsage, Seetle};
+use seetle::keyring::KeyringBackend;
+use seetle::memory::MemoryStorage;
 use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> Result<(), seelte::SeetleError> {
+async fn main() -> Result<(), seetle::SeetleError> {
     // 1. Initialize storage and backend
     let storage = Arc::new(MemoryStorage::new());
     let backend = KeyringBackend::new(storage);
-    let seelte = Seelte::new(backend);
+    let seetle = Seetle::new(backend);
 
     // 2. Define key bindings
     let bindings = Bindings {
@@ -139,7 +200,7 @@ async fn main() -> Result<(), seelte::SeetleError> {
     };
 
     // 3. Generate a hardware-bound key
-    let key_ref = seelte.seetle().generate_key(
+    let key_ref = seetle.seetle().generate_key(
         Algorithm::Ecdsa {
             name: "ECDSA".to_string(),
             named_curve: "P-256".to_string(),
@@ -156,10 +217,10 @@ async fn main() -> Result<(), seelte::SeetleError> {
 
 ### Advanced: Implementing a Custom Backend
 
-To use `seelte` with a custom provider, you need to implement `Backend` and `SecureStorage` traits. Here is a simple in-memory example:
+To use `seetle` with a custom provider, you need to implement `Backend` and `SecureStorage` traits. Here is a simple in-memory example:
 
 ```rust
-use seelte::{Algorithm, Bindings, KeyUsage, Seelte, Backend, SecureStorage, Seetle, KeyOrIdentifier, SeetleError, CryptoKey, KeyType};
+use seetle::{Algorithm, Bindings, KeyUsage, Seetle, Backend, SecureStorage, Seetle, KeyOrIdentifier, SeetleError, CryptoKey, KeyType};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -185,13 +246,9 @@ impl SecureStorage for MemoryStorage {
     }
 }
 
-// 2. Implement Backend and Seetle
+// 2. Implement Seetle trait
 struct MyBackend {
     storage: Arc<dyn SecureStorage>,
-}
-
-impl Backend for MyBackend {
-    fn seetle(&self) -> &dyn Seetle { self }
 }
 
 #[async_trait]
@@ -227,10 +284,10 @@ impl Seetle for MyBackend {
 
 ```rust
 #[tokio::main]
-async fn main() -> Result<(), seelte::SeetleError> {
+async fn main() -> Result<(), seetle::SeetleError> {
     let storage = Arc::new(MemoryStorage { items: Arc::new(Mutex::new(HashMap::new())) });
     let backend = MyBackend { storage };
-    let seelte = Seelte::new(backend);
+    let seetle = Seetle::new(backend);
 
     let bindings = Bindings {
         hardware_bound: true,
@@ -240,7 +297,7 @@ async fn main() -> Result<(), seelte::SeetleError> {
     };
 
     // Generate a hardware-bound key
-    let key_ref = seelte.seetle().generate_key(
+    let key_ref = seetle.seetle().generate_key(
         Algorithm::Ecdsa {
             name: "ECDSA".to_string(),
             named_curve: "P-256".to_string(),
@@ -257,15 +314,16 @@ async fn main() -> Result<(), seelte::SeetleError> {
 
 ## Extending WebCrypto
 
-Unlike the standard browser-based WebCrypto specification, `seelte` provides mechanisms like `update_key` and `delete_key` to manage hardware credentials continuously as keys transition between policies and origin relationships. It uses `KeyOrIdentifier` enums throughout cryptographic routines to execute hardware-level functions by just using handles/references.
+Unlike the standard browser-based WebCrypto specification, `seetle` provides mechanisms like `update_key` and `delete_key` to manage hardware credentials continuously as keys transition between policies and origin relationships. It uses `KeyOrIdentifier` enums throughout cryptographic routines to execute hardware-level functions by just using handles/references.
 
 ### Composition: Hardware-Protected Metadata
 
 You can compose storage and backends for enhanced security. For example, using the `TpmStorage` decorator with the `XHDBackend` to wrap hierarchical derivation paths in hardware:
 
 ```rust
-use seelte::backends::XHDBackend;
-use seelte::storage::{MemoryStorage, TpmStorage};
+use seetle::xhd::XHDBackend;
+use seetle::memory::MemoryStorage;
+use seetle::tpm::TpmStorage;
 use xhd_wallet_api::XPrv;
 use std::sync::Arc;
 
@@ -290,7 +348,7 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 
 ### Tropic Square Backend (feature-gated)
 
-For detailed information, see the [TropicBackend Documentation](docs/tropic.md).
+For detailed information, see the [TropicBackend Documentation](src/tropic/README.md).
 
 - A `TropicBackend` integrating the TROPIC01 secure element via `libtropic` is available behind the `tropic` Cargo feature.
 - To enable it, build with: `cargo build --features tropic`.

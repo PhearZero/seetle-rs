@@ -1,0 +1,88 @@
+### Nordic Backend
+
+The `NordicBackend` provides hardware-backed key management leveraging the Arm CryptoCell hardware accelerator and the PSA Crypto API available on Nordic Semiconductor SoCs.
+
+#### Features
+- **Hardware-backed storage**: Keys are stored securely and managed by the hardware.
+- **Support for ECDSA**: ECDSA P-256 with SHA-256.
+- **Support for Ed25519**: EdDSA Ed25519.
+- **Support for RSA-PSS**: RSA-PSS with SHA-256.
+- **Support for AES-GCM**: AES-GCM encryption/decryption.
+- **PSA Crypto API integration**: Directly interfaces with the Platform Security Architecture (PSA) standard.
+
+#### Prerequisites
+- **nRF Connect SDK (NCS)**: This backend is specifically designed to run within the nRF Connect SDK environment.
+- **Hardware Support**: Compatible with Nordic SoCs featuring Arm CryptoCell (e.g., nRF52840, nRF9160, nRF5340).
+
+#### Configuration
+To use the `NordicBackend`, ensure your NCS project configuration includes the following options (usually in `prj.conf`):
+```conf
+CONFIG_PSA_CRYPTO_DRIVER_CC3XX=y
+CONFIG_PSA_CRYPTO_CLIENT=y
+CONFIG_NORDIC_SECURITY_BACKEND=y
+```
+
+#### Usage Example
+```rust
+use seetle::nordic::NordicBackend;
+use seetle::memory::MemoryStorage; // Or any implementation of SecureStorage
+use std::sync::Arc;
+
+let storage = Arc::new(MemoryStorage::new());
+let backend = NordicBackend::new(storage);
+
+// Initialize PSA subsystem before use
+backend.init().expect("Failed to initialize PSA subsystem");
+
+let seetle = backend.seetle();
+// Proceed with generating or using keys via the Seetle trait...
+```
+
+#### Metadata Protection with TPM
+
+While Nordic devices typically don't have a TPM, the `NordicBackend` is compatible with any `SecureStorage` implementation. If your host environment provides a TPM, you can wrap the metadata:
+
+```rust
+use seetle::memory::MemoryStorage;
+use seetle::tpm::TpmStorage;
+use seetle::nordic::NordicBackend;
+use std::sync::Arc;
+
+let base_storage = Arc::new(MemoryStorage::new());
+let tpm_storage = Arc::new(TpmStorage::new(base_storage).unwrap());
+
+// Nordic metadata (PSA IDs, etc.) are now wrapped by TPM
+let backend = NordicBackend::new(tpm_storage);
+```
+
+#### Integration with XHD Backend
+
+The `NordicBackend` can serve as a hardware-backed root key provider for the `XHDBackend`. This allows you to keep the master seed of your HD wallet inside the Nordic's secure storage.
+
+```rust
+use seetle::xhd::XHDBackend;
+use seetle::nordic::NordicBackend;
+use seetle::memory::MemoryStorage;
+use seetle::{Algorithm, Bindings, KeyUsage, Seetle};
+use std::sync::Arc;
+
+let storage = Arc::new(MemoryStorage::new());
+let nordic_storage = Arc::new(MemoryStorage::new());
+let nordic_backend = Arc::new(NordicBackend::new(nordic_storage));
+
+nordic_backend.init().unwrap();
+
+let master_key_id = nordic_backend.generate_key(
+    Algorithm::Raw { length: 512 },
+    false,
+    Some(Bindings { identifier: "xhd-master".into(), ..Default::default() }),
+    vec![KeyUsage::DeriveBits]
+).await.unwrap();
+
+let xhd_backend = XHDBackend::new_with_backend(
+    storage,
+    nordic_backend.clone(),
+    "xhd-master".into(),
+    Algorithm::Raw { length: 512 }
+);
+```

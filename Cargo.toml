@@ -1,10 +1,10 @@
 [package]
-name = "seelte"
+name = "seetle"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "A Rust library based on WebCrypto's Seetle API with hardware-backed key management extensions"
-repository = "https://github.com/brave-experiments/hardware-backed-webcrypto"
+description = "A Rust library based on WebCrypto's API with hardware-backed key management extensions"
+repository = "https://github.com/phearzero/seetle-rs"
 readme = "README.md"
 
 [dependencies]
@@ -14,20 +14,36 @@ thiserror = "2.0"
 async-trait = "0.1"
 futures = "0.3"
 tokio = { version = "1.0", features = ["full"] }
-keyring = "3.3"
+clap = { version = "4.0", features = ["derive"] }
+keyring = { version = "3.3", features = ["apple-native", "windows-native", "linux-native", "sync-secret-service", "crypto-rust"] }
 ring = "0.17"
 uuid = { version = "1.0", features = ["v4"] }
 hex = "0.4"
 xhd-wallet-api = { package = "ed25519-bip32", git = "https://github.com/algorandfoundation/xHD-Wallet-API-rs.git" }
 tss-esapi = { version = "7.5", optional = true }
+ratatui = "0.29"
+tui-logger = "0.14"
+crossterm = "0.28"
+confy = "0.6"
+log = "0.4"
+arboard = "3.4"
+hpke = "0.12"
+x25519-dalek = "2.0"
+ed25519-dalek = "2.1"
+curve25519-dalek = "4.1"
+rand = "0.8"
+tropic01 = { version = "0.1", optional = true }
+embedded-hal = "1.0"
+dummy-pin = "1.0"
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [features]
 default = []
-tropic = []
+tropic = ["dep:tropic01"]
 tpm = ["dep:tss-esapi"]
 
 [build-dependencies]
-cmake = "0.1"
+# cmake is no longer needed since we use tropic01 crate
 
 [package.metadata.docs.rs]
 all-features = true

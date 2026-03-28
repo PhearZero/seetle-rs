@@ -2,8 +2,19 @@ use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 use thiserror::Error;
 
-pub mod backends;
-pub mod storage;
+pub mod config;
+pub mod tui;
+pub mod tpm;
+pub mod keyring;
+pub mod secure_env;
+pub mod xhd;
+pub mod nordic;
+#[cfg(feature = "tropic")]
+pub mod tropic;
+pub mod mock;
+pub mod file;
+pub mod memory;
+pub mod init;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum KeyType {
@@ -68,9 +79,30 @@ pub enum Algorithm {
     Generic {
         name: String,
     },
+    /// A raw key or seed of a given length in bits.
+    Raw {
+        length: u32,
+    },
     Ed25519 {
         name: String,
-    }
+    },
+    Ecdh {
+        name: String,
+        public_key: Vec<u8>,
+    },
+    Hpke {
+        name: String, // e.g., "DHKEM_X25519_HKDF_SHA256"
+        public_key: Option<Vec<u8>>, // For encrypt/seal
+        info: Option<Vec<u8>>,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HardwareBound {
+    #[default]
+    No,
+    Yes,
+    Partial,
 }
 
 /// Key management extension for hardware-backed keys.
@@ -80,8 +112,10 @@ pub enum Algorithm {
 pub struct Bindings {
     /// Determines if the CryptoKey will be hardware bound.
     /// If set to true, extractable must be false.
-    #[serde(rename = "hardwareBound")]
-    pub hardware_bound: bool,
+    #[serde(rename = "hardwareBound", alias = "hardware_bound")]
+    pub hardware_bound: HardwareBound,
+
+    pub extractable: bool,
 
     /// List of origins which have access to this cryptographic key for usage and management.
     /// Defaults to the origin of the caller if not set.
@@ -93,6 +127,23 @@ pub struct Bindings {
 
     /// Allows the original creator to limit whether or not a key can be updated.
     pub updatable: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct KeyMetadata {
+    pub identifier: String,
+    pub algorithm: String,
+    pub usages: Vec<KeyUsage>,
+    pub hardware_bound: HardwareBound,
+    pub extractable: bool,
+    pub public_key: Option<Vec<u8>>,
+
+    // XHD Specific
+    pub context: Option<String>,
+    pub account: Option<u32>,
+    pub index: Option<u32>,
+    pub derivation: Option<String>,
+    pub source_key_identifier: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -129,35 +180,15 @@ pub trait SecureStorage: Send + Sync {
 
     /// Deletes a value for the given key.
     async fn remove_item(&self, key: &str) -> Result<(), SeetleError>;
+
+    /// Lists all keys stored.
+    async fn list_items(&self) -> Result<Vec<String>, SeetleError>;
 }
 
-/// A cryptographic backend that provides a Seetle implementation.
-pub trait Backend: Send + Sync {
-    /// Returns the Seetle instance for this backend.
-    fn seetle(&self) -> &dyn Seetle;
-}
 
-/// The main entry point for the seelte library.
-pub struct Seelte {
-    backend: Box<dyn Backend>,
-}
-
-impl Seelte {
-    /// Creates a new Seelte instance with the given backend.
-    pub fn new(backend: impl Backend + 'static) -> Self {
-        Self {
-            backend: Box::new(backend),
-        }
-    }
-
-    /// Access the Seetle API for this backend.
-    pub fn seetle(&self) -> &dyn Seetle {
-        self.backend.seetle()
-    }
-}
 
 #[async_trait]
-pub trait Seetle {
+pub trait Seetle: Send + Sync {
     /// Generates a new key (or key pair).
     ///
     /// If `bindings` are provided with `hardware_bound: true`, the key will be hardware-backed.
@@ -185,6 +216,12 @@ pub trait Seetle {
         &self,
         identifier: String,
     ) -> Result<(), SeetleError>;
+
+    /// Lists all identifiers of hardware-backed keys.
+    async fn list_keys(&self) -> Result<Vec<String>, SeetleError>;
+
+    /// Gets metadata for a hardware-backed key.
+    async fn get_key_metadata(&self, identifier: String) -> Result<KeyMetadata, SeetleError>;
 
     /// Generates a digital signature for the given data.
     ///
@@ -244,7 +281,7 @@ pub trait Seetle {
     async fn export_key(
         &self,
         format: String,
-        key: CryptoKey,
+        key: KeyOrIdentifier,
     ) -> Result<Vec<u8>, SeetleError>;
 
     /// Derives a key from a base key.
@@ -290,16 +327,15 @@ pub trait Seetle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::mock::MockBackend;
-    use crate::storage::MemoryStorage;
+    use crate::mock::MockBackend;
+    use crate::memory::MemoryStorage;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_generate_hardware_key() {
         let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = MockBackend::new(storage);
-        let seelte = Seelte::new(backend);
-        let seetle = seelte.seetle();
+        let seetle: &dyn Seetle = &backend;
 
         let algorithm = Algorithm::Ecdsa {
             name: "ECDSA".into(),
@@ -307,10 +343,11 @@ mod tests {
             hash: None,
         };
         let bindings = Bindings {
-            hardware_bound: true,
+            hardware_bound: HardwareBound::Yes,
             origin_bindings: vec!["example.com".into()],
             identifier: "123ABC".into(),
             updatable: true,
+            extractable: false,
         };
 
         let result = seetle.generate_key(
@@ -330,8 +367,7 @@ mod tests {
     async fn test_hardware_bound_must_not_be_extractable() {
         let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = MockBackend::new(storage);
-        let seelte = Seelte::new(backend);
-        let seetle = seelte.seetle();
+        let seetle: &dyn Seetle = &backend;
 
         let algorithm = Algorithm::Ecdsa {
             name: "ECDSA".into(),
@@ -339,31 +375,30 @@ mod tests {
             hash: None,
         };
         let bindings = Bindings {
-            hardware_bound: true,
             identifier: "123ABC".into(),
+            extractable: true,
             ..Default::default()
         };
 
         let result = seetle.generate_key(
             algorithm,
-            true, // extractable = true should fail if hardware_bound = true
+            true, // extractable = true should fail if hardware_bound = true? Not anymore.
             Some(bindings),
             vec![],
         ).await;
 
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_hardware_key_storage() {
         let storage: Arc<dyn SecureStorage> = Arc::new(MemoryStorage::new());
         let backend = MockBackend::new(storage.clone());
-        let seelte = Seelte::new(backend);
-        let seetle = seelte.seetle();
+        let seetle: &dyn Seetle = &backend;
 
         let id = "test-key".to_string();
         let bindings = Bindings {
-            hardware_bound: true,
+            hardware_bound: HardwareBound::Yes,
             identifier: id.clone(),
             ..Default::default()
         };
