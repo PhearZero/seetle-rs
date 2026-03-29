@@ -41,6 +41,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 default = []
 tropic = ["dep:tropic01"]
 tpm = ["dep:tss-esapi"]
+nordic = []
 
 [build-dependencies]
 # cmake is no longer needed since we use tropic01 crate

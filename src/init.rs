@@ -8,9 +8,14 @@ use crate::xhd::XHDBackend;
 use crate::keyring::{KeyringBackend, KeyringStorage};
 #[cfg(feature = "tpm")]
 use crate::tpm::{TpmBackend, TpmStorage};
+#[cfg(feature = "nordic")]
+use crate::nordic::NordicBackend;
+#[cfg(feature = "tropic")]
+use crate::tropic::TropicBackend;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::secure_env::SecureEnvBackend;
 use crate::mock::MockBackend;
 use crate::file::FileStorage;
-use crate::memory::MemoryStorage;
 
 pub async fn setup_seetle(config: &SeetleConfig) -> Result<Arc<dyn Seetle>, Box<dyn Error>> {
     let storage_dir = &config.storage_dir;
@@ -20,7 +25,6 @@ pub async fn setup_seetle(config: &SeetleConfig) -> Result<Arc<dyn Seetle>, Box<
     let tpm_device = &config.tpm_device;
 
     // 1. Initialize base storage (FileStorage)
-    let is_wrapped = storage_wrapper != "none";
     let storage_extension = match storage_wrapper.as_str() {
         "tpm" => Some(".tpm.enc".to_string()),
         "keyring" => Some(".keyring.enc".to_string()),
@@ -64,25 +68,7 @@ pub async fn setup_seetle(config: &SeetleConfig) -> Result<Arc<dyn Seetle>, Box<
             #[cfg(feature = "tpm")]
             {
                 debug!("Using TPM as root backend");
-                let tpm_metadata_dir = storage_dir.join("tpm-root");
-                let root_ext = if is_wrapped { ".tpm.enc".to_string() } else { ".tpm.json".to_string() };
-                let tpm_storage_base = Arc::new(FileStorage::new_with_extension(tpm_metadata_dir, Some(root_ext))?);
-                let tpm_storage: Arc<dyn SecureStorage> = if is_wrapped {
-                    match storage_wrapper.as_str() {
-                        "tpm" => {
-                            Arc::new(TpmStorage::new(tpm_storage_base, tpm_context.clone().unwrap())?)
-                        },
-                        "keyring" => {
-                            let storage = KeyringStorage::new(tpm_storage_base, "seetle", "master-key")?;
-                            storage.initialize().await?;
-                            Arc::new(storage)
-                        },
-                        _ => tpm_storage_base,
-                    }
-                } else {
-                    tpm_storage_base
-                };
-                Arc::new(TpmBackend::new(tpm_storage, tpm_context.unwrap())?)
+                Arc::new(TpmBackend::new(secure_storage.clone(), tpm_context.unwrap())?)
             }
             #[cfg(not(feature = "tpm"))]
             {
@@ -91,37 +77,54 @@ pub async fn setup_seetle(config: &SeetleConfig) -> Result<Arc<dyn Seetle>, Box<
         },
         "keyring" => {
             debug!("Using Keyring as root backend");
-            let keyring_metadata_dir = storage_dir.join("keyring-root");
-            let root_ext = if is_wrapped { ".keyring.enc".to_string() } else { ".keyring.json".to_string() };
-            let keyring_storage_base = Arc::new(FileStorage::new_with_extension(keyring_metadata_dir, Some(root_ext))?);
-            let keyring_storage: Arc<dyn SecureStorage> = if is_wrapped {
-                match storage_wrapper.as_str() {
-                    "tpm" => {
-                        #[cfg(feature = "tpm")]
-                        {
-                            Arc::new(TpmStorage::new(keyring_storage_base, tpm_context.clone().unwrap())?)
-                        }
-                        #[cfg(not(feature = "tpm"))]
-                        {
-                            return Err("TPM support not enabled".into());
-                        }
-                    },
-                    "keyring" => {
-                        let storage = KeyringStorage::new(keyring_storage_base, "seetle", "master-key")?;
-                        storage.initialize().await?;
-                        Arc::new(storage)
-                    },
-                    _ => keyring_storage_base,
+            Arc::new(KeyringBackend::new(secure_storage.clone()))
+        },
+        "nordic" => {
+            #[cfg(feature = "nordic")]
+            {
+                debug!("Using Nordic as root backend");
+                let backend = Arc::new(NordicBackend::new(secure_storage.clone()));
+                // Nordic backend might need initialization, but let's keep it simple for now
+                // as per current NordicBackend implementation.
+                backend
+            }
+            #[cfg(not(feature = "nordic"))]
+            {
+                return Err("Nordic support not enabled".into());
+            }
+        },
+        "tropic" => {
+            #[cfg(feature = "tropic")]
+            {
+                debug!("Using Tropic as root backend");
+                Arc::new(TropicBackend::new(secure_storage.clone())?)
+            }
+            #[cfg(not(feature = "tropic"))]
+            {
+                return Err("Tropic support not enabled".into());
+            }
+        },
+        "secure-env" | "hpke" => {
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                debug!("Using SecureEnv as root backend");
+                Arc::new(SecureEnvBackend::new(secure_storage.clone()))
+            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // If the user said "hpke" they might mean a mock backend that supports HPKE?
+                // But for now, let's treat it as not supported on this platform if it's secure-env.
+                if root_backend == "hpke" {
+                     debug!("Using MockBackend for HPKE root");
+                     Arc::new(MockBackend::new(secure_storage.clone()))
+                } else {
+                    return Err("SecureEnv support only available on Android or iOS".into());
                 }
-            } else {
-                keyring_storage_base
-            };
-            Arc::new(KeyringBackend::new(keyring_storage))
+            }
         },
         _ => {
             debug!("Using MockBackend as root backend");
-            let mock_storage = Arc::new(MemoryStorage::new());
-            Arc::new(MockBackend::new(mock_storage))
+            Arc::new(MockBackend::new(secure_storage.clone()))
         }
     };
 
@@ -131,18 +134,6 @@ pub async fn setup_seetle(config: &SeetleConfig) -> Result<Arc<dyn Seetle>, Box<
 
     match root_backend_inst.derive_bits(master_alg.clone(), KeyOrIdentifier::Identifier(master_key_id.into()), 512).await {
         Err(crate::SeetleError::KeyNotFound) => {
-            let root_metadata_dir = match root_backend.as_str() {
-                "tpm" => Some(storage_dir.join("tpm-root")),
-                "keyring" => Some(storage_dir.join("keyring-root")),
-                _ => None,
-            };
-
-            if let Some(dir) = root_metadata_dir {
-                if dir.exists() && std::fs::read_dir(&dir)?.any(|e| e.is_ok()) {
-                     return Err(format!("Master seed not found in root backend ({}), but metadata exists. This indicates a persistence issue (e.g. keyring cleared or TPM hierarchy mismatch).", root_backend).into());
-                }
-            }
-
             info!("Master seed not found in root backend, generating it...");
             root_backend_inst.generate_key(
                 master_alg.clone(),

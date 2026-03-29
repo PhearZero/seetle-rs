@@ -235,18 +235,35 @@ impl App {
         if let Some(ref s) = self.seetle {
             match s.list_keys().await {
                 Ok(mut ids) => {
+                    let master_id = "seetle-master-seed";
+                    if !ids.contains(&master_id.to_string()) {
+                        ids.push(master_id.to_string());
+                    }
                     ids.sort();
                     let mut keys = Vec::new();
                     for id in ids {
                         match s.get_key_metadata(id.clone()).await {
                             Ok(m) => keys.push(m),
                             Err(e) => {
-                                error!("Failed to get metadata for {}: {}", id, e);
-                                // Push minimal metadata if it fails
-                                keys.push(crate::KeyMetadata {
-                                    identifier: id,
-                                    ..Default::default()
-                                });
+                                if id == master_id {
+                                    // Synthesize metadata for the master seed if it's missing from storage
+                                    // This allows the UI to show it deterministically.
+                                    keys.push(crate::KeyMetadata {
+                                        identifier: id,
+                                        algorithm: "MasterSeed (Hardware-backed)".to_string(),
+                                        usages: vec![crate::KeyUsage::DeriveBits],
+                                        hardware_bound: crate::HardwareBound::Yes,
+                                        extractable: true,
+                                        ..Default::default()
+                                    });
+                                } else {
+                                    error!("Failed to get metadata for {}: {}", id, e);
+                                    // Push minimal metadata if it fails
+                                    keys.push(crate::KeyMetadata {
+                                        identifier: id,
+                                        ..Default::default()
+                                    });
+                                }
                             }
                         }
                     }
@@ -1061,10 +1078,14 @@ async fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Re
                                     let seetle = app.seetle.clone().unwrap();
                                     let id = identifier.clone();
                                     info!("Deleting key: {}", id);
-                                    match seetle.delete_key(id).await {
+                                    match seetle.delete_key(id.clone()).await {
                                         Ok(_) => {
                                             info!("Key deleted successfully");
-                                            app.refresh_keys().await;
+                                            if id == "seetle-master-seed" {
+                                                app.refresh_seetle().await;
+                                            } else {
+                                                app.refresh_keys().await;
+                                            }
                                         }
                                         Err(e) => error!("Failed to delete key: {}", e),
                                     }

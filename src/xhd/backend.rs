@@ -256,15 +256,27 @@ impl Seetle for XHDBackend {
     }
 
     async fn delete_key(&self, identifier: String) -> Result<(), SeetleError> {
+        // Delegate to root backend if identifier matches
+        if let RootKeySource::Backend { backend, identifier: root_id, .. } = &self.root_key_source {
+            if identifier == *root_id {
+                return backend.delete_key(identifier).await;
+            }
+        }
+
         self.storage.remove_item(&identifier).await?;
         Ok(())
     }
 
     async fn list_keys(&self) -> Result<Vec<String>, SeetleError> {
         let mut keys = self.storage.list_items().await?;
-        if let RootKeySource::Backend { identifier, .. } = &self.root_key_source {
+        if let RootKeySource::Backend { backend, identifier, .. } = &self.root_key_source {
             if !keys.contains(identifier) {
-                keys.push(identifier.clone());
+                // Only add if it actually exists in the root backend
+                if let Ok(root_keys) = backend.list_keys().await {
+                    if root_keys.contains(identifier) {
+                        keys.push(identifier.clone());
+                    }
+                }
             }
         }
         // Filter out hidden internal keys
@@ -1245,5 +1257,51 @@ mod xhd_tests {
         // Master seed should also be partially bound in this context
         let meta_root = seetle.get_key_metadata("master-seed-id".into()).await.unwrap();
         assert_eq!(meta_root.hardware_bound, HardwareBound::Partial);
+    }
+
+    #[tokio::test]
+    async fn test_xhd_root_key_deletion() {
+        use crate::mock::MockBackend;
+        use crate::memory::MemoryStorage;
+
+        let root_storage = Arc::new(MemoryStorage::new());
+        let root_backend = Arc::new(MockBackend::new(root_storage.clone()));
+        let xhd_storage = Arc::new(MemoryStorage::new());
+
+        let root_id = "master-seed";
+        let master_alg = Algorithm::Generic { name: "MasterSeed".into() };
+
+        // 1. Generate root key
+        root_backend.generate_key(
+            master_alg.clone(),
+            true,
+            Some(Bindings {
+                identifier: root_id.into(),
+                ..Default::default()
+            }),
+            vec![KeyUsage::DeriveBits]
+        ).await.unwrap();
+
+        let xhd = XHDBackend::new_with_backend(
+            xhd_storage.clone(),
+            root_backend.clone(),
+            root_id.into(),
+            master_alg.clone()
+        );
+
+        // 2. Verify it's in list_keys
+        let keys = xhd.list_keys().await.unwrap();
+        assert!(keys.contains(&root_id.to_string()));
+
+        // 3. Delete it via XHD
+        xhd.delete_key(root_id.into()).await.unwrap();
+
+        // 4. Verify it's gone from list_keys
+        let keys = xhd.list_keys().await.unwrap();
+        assert!(!keys.contains(&root_id.to_string()));
+
+        // 5. Verify it's gone from root backend too
+        let root_keys = root_backend.list_keys().await.unwrap();
+        assert!(!root_keys.contains(&root_id.to_string()));
     }
 }

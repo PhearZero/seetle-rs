@@ -8,6 +8,7 @@ pub mod tpm;
 pub mod keyring;
 pub mod secure_env;
 pub mod xhd;
+#[cfg(feature = "nordic")]
 pub mod nordic;
 #[cfg(feature = "tropic")]
 pub mod tropic;

@@ -53,6 +53,44 @@ impl KeyringBackend {
     fn get_key_entry(&self, identifier: &str) -> Result<Entry, SeetleError> {
         Entry::new(&self.service, identifier).map_err(|e| SeetleError::StorageError(e.to_string()))
     }
+
+    async fn metadata_to_key_metadata(&self, identifier: String, metadata: KeyringMetadata) -> Result<KeyMetadata, SeetleError> {
+        let entry = self.get_key_entry(&identifier)?;
+        let key_hex = entry.get_password().map_err(|e| SeetleError::StorageError(e.to_string()))?;
+        let key_material = hex::decode(&key_hex).map_err(|_| SeetleError::DataError)?;
+
+        let public_key = match &metadata.algorithm {
+            Algorithm::Ed25519 { .. } => {
+                let key_pair = signature::Ed25519KeyPair::from_pkcs8(&key_material)
+                    .map_err(|e| SeetleError::OperationError(format!("Invalid key material: {}", e)))?;
+                Some(key_pair.public_key().as_ref().to_vec())
+            }
+            Algorithm::Ecdsa { named_curve, .. } => {
+                if named_curve == "P-256" {
+                    let key_pair = signature::EcdsaKeyPair::from_pkcs8(
+                        &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+                        &key_material,
+                        &rand::SystemRandom::new()
+                    ).map_err(|e| SeetleError::OperationError(format!("Invalid key material: {}", e)))?;
+                    Some(key_pair.public_key().as_ref().to_vec())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        Ok(KeyMetadata {
+            identifier,
+            algorithm: format!("{:?}", metadata.algorithm),
+            usages: metadata.usages,
+            hardware_bound: metadata.bindings.hardware_bound,
+            extractable: metadata.bindings.extractable,
+            public_key,
+            source_key_identifier: None,
+            ..Default::default()
+        })
+    }
 }
 
 
@@ -161,42 +199,7 @@ impl Seetle for KeyringBackend {
 
     async fn get_key_metadata(&self, identifier: String) -> Result<KeyMetadata, SeetleError> {
         let metadata = self.get_metadata(&identifier).await?;
-        
-        let entry = self.get_key_entry(&identifier)?;
-        let key_hex = entry.get_password().map_err(|e| SeetleError::StorageError(e.to_string()))?;
-        let key_material = hex::decode(&key_hex).map_err(|_| SeetleError::DataError)?;
-
-        let public_key = match &metadata.algorithm {
-            Algorithm::Ed25519 { .. } => {
-                let key_pair = signature::Ed25519KeyPair::from_pkcs8(&key_material)
-                    .map_err(|e| SeetleError::OperationError(format!("Invalid key material: {}", e)))?;
-                Some(key_pair.public_key().as_ref().to_vec())
-            }
-            Algorithm::Ecdsa { named_curve, .. } => {
-                if named_curve == "P-256" {
-                    let key_pair = signature::EcdsaKeyPair::from_pkcs8(
-                        &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-                        &key_material,
-                        &rand::SystemRandom::new()
-                    ).map_err(|e| SeetleError::OperationError(format!("Invalid key material: {}", e)))?;
-                    Some(key_pair.public_key().as_ref().to_vec())
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-
-        Ok(KeyMetadata {
-            identifier,
-            algorithm: format!("{:?}", metadata.algorithm),
-            usages: metadata.usages,
-            hardware_bound: metadata.bindings.hardware_bound,
-            extractable: metadata.bindings.extractable,
-            public_key,
-            source_key_identifier: None,
-            ..Default::default()
-        })
+        self.metadata_to_key_metadata(identifier, metadata).await
     }
 
     async fn sign(
@@ -384,27 +387,23 @@ impl Seetle for KeyringBackend {
     ) -> Result<Vec<u8>, SeetleError> {
         match base_key {
             KeyOrIdentifier::Identifier(id) => {
-                // Ensure metadata exists
+                // Check metadata first to ensure deterministic behavior (no side-effect recovery)
                 let _metadata = self.get_metadata(&id).await?;
                 
                 let entry = self.get_key_entry(&id)?;
-                let key_hex = match entry.get_password() {
-                    Ok(hex) => hex,
-                    Err(keyring::Error::NoEntry) => {
-                        return Err(SeetleError::KeyNotFound);
+                if let Ok(key_hex) = entry.get_password() {
+                    let key_material = hex::decode(key_hex).map_err(|_e| SeetleError::DataError)?;
+                    
+                    if length == 512 {
+                        use ring::digest;
+                        let hash = digest::digest(&digest::SHA512, &key_material);
+                        return Ok(hash.as_ref().to_vec());
+                    } else if key_material.len() == (length / 8) as usize {
+                        return Ok(key_material);
                     }
-                    Err(e) => return Err(SeetleError::StorageError(e.to_string())),
-                };
-                let key_material = hex::decode(key_hex).map_err(|_e| SeetleError::DataError)?;
-                
-                if length == 512 {
-                    // Use SHA-512 to derive 512 bits from the key material.
-                    use ring::digest;
-                    let hash = digest::digest(&digest::SHA512, &key_material);
-                    Ok(hash.as_ref().to_vec())
-                } else {
-                    Err(SeetleError::NotSupported)
                 }
+
+                Err(SeetleError::OperationError("Key material mismatch or missing in keyring".into()))
             }
             _ => Err(SeetleError::NotSupported),
         }
@@ -603,5 +602,76 @@ mod keyring_tests {
             }
             Err(e) => panic!("Failed to derive bits: {:?}", e),
         }
+    }
+
+    #[tokio::test]
+    async fn test_keyring_master_seed_persistence() {
+        let storage = Arc::new(MemoryStorage::new());
+        let backend = KeyringBackend::new(storage.clone());
+        let id = "seetle-master-seed";
+        
+        // 1. Generate master seed
+        if let Err(SeetleError::StorageError(e)) = backend.generate_key(
+            Algorithm::Generic { name: "Master".into() },
+            true,
+            Some(Bindings {
+                identifier: id.to_string(),
+                hardware_bound: HardwareBound::Yes,
+                ..Default::default()
+            }),
+            vec![KeyUsage::DeriveBits]
+        ).await {
+            println!("Skipping keyring persistence test: {}", e);
+            return;
+        }
+
+        // 2. Derive bits
+        let bits = backend.derive_bits(
+            Algorithm::Raw { length: 256 },
+            KeyOrIdentifier::Identifier(id.to_string()),
+            256
+        ).await.expect("Should derive from keyring with metadata");
+        
+        assert_eq!(bits.len(), 32);
+        
+        // Cleanup
+        let _ = backend.delete_key(id.to_string()).await;
+    }
+
+    #[tokio::test]
+    async fn test_keyring_metadata_persistence() {
+        let storage = Arc::new(crate::memory::storage::MemoryStorage::new());
+        let backend = KeyringBackend::new(storage.clone());
+        let id = "seetle-master-seed";
+
+        // 1. Initially it should NOT be in the list
+        let keys = backend.list_keys().await.unwrap();
+        assert!(!keys.contains(&id.to_string()));
+
+        // 2. Generate it
+        if let Err(SeetleError::StorageError(e)) = backend.generate_key(
+            Algorithm::Generic { name: "Master".into() },
+            true,
+            Some(Bindings {
+                identifier: id.to_string(),
+                hardware_bound: HardwareBound::Yes,
+                ..Default::default()
+            }),
+            vec![KeyUsage::DeriveBits]
+        ).await {
+            println!("Skipping keyring persistence test: {}", e);
+            return;
+        }
+
+        // 3. Now it should be there
+        let keys2 = backend.list_keys().await.unwrap();
+        assert!(keys2.contains(&id.to_string()));
+
+        let meta = backend.get_key_metadata(id.to_string()).await.unwrap();
+        assert_eq!(meta.identifier, id);
+        assert_eq!(meta.hardware_bound, HardwareBound::Yes);
+
+        // Cleanup
+        let _ = backend.delete_key(id.to_string()).await;
     }
 }
